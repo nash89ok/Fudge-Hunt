@@ -301,7 +301,7 @@ export function ZapWorksCameraPreview() {
           style={{
             position: 'absolute',
             left: '50%',
-            bottom: 72,
+            bottom: 92,
             transform: 'translateX(-50%)',
             zIndex: 4,
             minWidth: 168,
