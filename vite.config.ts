@@ -11,6 +11,8 @@ const root = path.dirname(fileURLToPath(import.meta.url));
  * Several transitive deps are CJS-only; shims in `src/shims/` provide ESM named/default exports.
  */
 export default defineConfig({
+  /** GitHub Pages project-site base path: https://nash89ok.github.io/Fudge-Hunt/ */
+  base: '/Fudge-Hunt/',
   /**
    * Self-signed HTTPS so phones on Wi‑Fi can open `https://<your-lan-ip>:5173` — camera APIs need a secure context.
    * Accept the browser “not secure” / certificate warning once on each device.
