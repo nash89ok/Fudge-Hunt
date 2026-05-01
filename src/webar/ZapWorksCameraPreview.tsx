@@ -24,6 +24,16 @@ const MARKER_STEP_COUNT = MARKER_ZPT_URLS.length;
 /** Brief cube flash duration after tapping collect (ms). */
 const COLLECT_FEEDBACK_MS = 350;
 
+/** Handwritten face aligned with the landing / Figma hunt-intro frame (`index.html` loads Architects Daughter). */
+const BRAND_FONT = "'Architects Daughter', cursive, system-ui, sans-serif";
+
+/**
+ * Body copy from the “Start the hunt” screen frame — guides players before the camera turns on.
+ * @see https://www.figma.com/design/NvCn1Y6oG9WEw6IwwznGi1/Untitled?node-id=27-23
+ */
+const HUNT_INTRO_COPY =
+  'There are three fudges hidden in this world, fudge elves marked their locations on the treasure map. Go Find them, you will be rewarded with a real fudge!';
+
 /**
  * ZapWorks WebAR: world-surface test mode, or sequential marker hunt (`fudge-marker1–3.zpt`).
  */
@@ -215,31 +225,73 @@ export function ZapWorksCameraPreview() {
             flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: 16,
-            padding: 24,
-            background: 'rgba(0,0,0,0.88)',
+            boxSizing: 'border-box',
+            padding: 'clamp(20px, 5vh, 40px) clamp(20px, 5vw, 32px)',
+            background: '#ffffff',
+            color: '#000000',
           }}
         >
-          <p style={{ color: '#eee', textAlign: 'center', maxWidth: 360, margin: 0 }}>
-            Tap below, then allow camera access when your browser asks (required on phones).
-          </p>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={onStart}
+          <div
             style={{
-              padding: '14px 28px',
-              fontSize: 17,
-              fontWeight: 600,
-              border: 'none',
-              borderRadius: 8,
-              background: '#e8b923',
-              color: '#111',
-              cursor: busy ? 'wait' : 'pointer',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 28,
+              width: '100%',
+              maxWidth: 402,
             }}
           >
-            {busy ? '…' : 'Start camera'}
-          </button>
+            <img
+              src={`${import.meta.env.BASE_URL}hunt/treasure-map.png`}
+              alt=""
+              width={210}
+              height={302}
+              style={{
+                width: 'min(100%, 210px)',
+                height: 'auto',
+                maxHeight: 302,
+                display: 'block',
+                objectFit: 'contain',
+              }}
+            />
+            <p
+              style={{
+                margin: 0,
+                maxWidth: 350,
+                fontFamily: BRAND_FONT,
+                fontSize: 14,
+                lineHeight: 1.35,
+                fontWeight: 400,
+                textAlign: 'center',
+                color: '#000000',
+              }}
+            >
+              {HUNT_INTRO_COPY}
+            </p>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onStart}
+              style={{
+                width: '100%',
+                maxWidth: 208,
+                minHeight: 38,
+                padding: '0 16px',
+                fontFamily: BRAND_FONT,
+                fontSize: 14,
+                fontWeight: 400,
+                border: '1px solid #000000',
+                borderRadius: 6,
+                background: '#000000',
+                color: '#ffffff',
+                cursor: busy ? 'wait' : 'pointer',
+                opacity: busy ? 0.75 : 1,
+              }}
+            >
+              {busy ? '…' : 'Start the hunt'}
+            </button>
+          </div>
         </div>
       )}
       {showErr && (
