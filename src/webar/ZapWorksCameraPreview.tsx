@@ -1,6 +1,6 @@
 import * as ZapparThree from '@zappar/zappar-threejs';
 import { BrowserCompatibility, ZapparCamera, ZapparCanvas } from '@zappar/zappar-react-three-fiber';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { MarkerImageContent, type TargetLoadState } from './MarkerImageContent';
 import { MarkerWorldEnvironment } from './MarkerWorldEnvironment';
 import { preloadZapparEngine } from './preloadZappar';
@@ -78,6 +78,27 @@ export function ZapWorksCameraPreview() {
 
   const huntComplete = collectedCount >= MARKER_STEP_COUNT;
   const huntActive = collectedCount < MARKER_STEP_COUNT;
+
+  /**
+   * Image indices that need a secondary tracker: the last collected marker (yellow cube), and while the collect
+   * flash runs, the current marker’s .zpt is preloaded so the handoff does not blink when `collectedCount` increments.
+   */
+  const persistLayerIndices = useMemo(() => {
+    if (!cameraOn || !huntActive) {
+      return [] as number[];
+    }
+    const out: number[] = [];
+    if (collectedCount > 0) {
+      out.push(collectedCount - 1);
+    }
+    if (showCollectedCube && collectedCount < MARKER_STEP_COUNT) {
+      const preloadIdx = collectedCount;
+      if (!out.includes(preloadIdx)) {
+        out.push(preloadIdx);
+      }
+    }
+    return out;
+  }, [cameraOn, huntActive, collectedCount, showCollectedCube]);
 
   useEffect(() => {
     let cancelled = false;
@@ -368,20 +389,34 @@ export function ZapWorksCameraPreview() {
         Fudge Hunt · ZapWorks WebAR · Register your domain with ZapWorks for production
       </p>
       <ZapparCanvas style={{ width: '100%', height: '100dvh', display: 'block' }} gl={{ antialias: true }}>
-        <ambientLight intensity={0.85} />
-        <directionalLight position={[2, 4, 3]} intensity={0.9} />
+        <ambientLight intensity={2} />
+        <directionalLight position={[2, 4, 3]} intensity={1.2} />
         <ZapparCamera userFacing={false} start={cameraOn} permissionRequest={false} />
         {!WORLD_SURFACE_TEST_MODE && cameraOn ? <MarkerWorldEnvironment enabled /> : null}
         {WORLD_SURFACE_TEST_MODE ? (
           <WorldSurfaceTestContent enabled={cameraOn} onSurfacePlaced={onWorldSurfacePlaced} />
         ) : (
-          <MarkerImageContent
-            enabled={cameraOn && huntActive}
-            targetZptUrl={MARKER_ZPT_URLS[Math.min(collectedCount, MARKER_STEP_COUNT - 1)]}
-            showCollectedCube={showCollectedCube}
-            onTrackedChange={onMarkerTrackedChange}
-            onTargetLoadState={onTargetLoadState}
-          />
+          <>
+            {persistLayerIndices.map((persistZptIndex) => (
+              <MarkerImageContent
+                key={`persist-zpt-${persistZptIndex}`}
+                enabled
+                persistentCollected
+                reportTracking={false}
+                reportTargetLoad={false}
+                targetZptUrl={MARKER_ZPT_URLS[persistZptIndex]}
+                showPersistentCollectedMesh={collectedCount > 0 && persistZptIndex === collectedCount - 1}
+              />
+            ))}
+            <MarkerImageContent
+              key={`hunt-${collectedCount}`}
+              enabled={cameraOn && huntActive}
+              targetZptUrl={MARKER_ZPT_URLS[Math.min(collectedCount, MARKER_STEP_COUNT - 1)]}
+              showCollectedCube={showCollectedCube}
+              onTrackedChange={onMarkerTrackedChange}
+              onTargetLoadState={onTargetLoadState}
+            />
+          </>
         )}
       </ZapparCanvas>
     </div>

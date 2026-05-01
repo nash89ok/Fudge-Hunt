@@ -20,6 +20,17 @@ export type TargetLoadState = 'idle' | 'loading' | 'ready' | 'error';
 type Props = {
   enabled: boolean;
   targetZptUrl: string;
+  /** When true, always show the collected yellow cube (no rock); does not drive the collect button. */
+  persistentCollected?: boolean;
+  /** When false, visibility changes are not reported (use for a secondary tracker layer). */
+  reportTracking?: boolean;
+  /** When false, load state is not reported (only the active hunt layer should update the banner). */
+  reportTargetLoad?: boolean;
+  /**
+   * With {@link persistentCollected}: when false, the tracker still runs but the yellow cube is hidden
+   * (preload the next handoff while the hunt layer shows the collect flash on the same print).
+   */
+  showPersistentCollectedMesh?: boolean;
   showCollectedCube?: boolean;
   onTrackedChange?: (tracked: boolean) => void;
   onTargetLoadState?: (state: TargetLoadState, message?: string) => void;
@@ -29,10 +40,17 @@ type Props = {
  * Image-tracked marker flow: plane and {@link MarkerRockStageModel} stay parented to {@link ImageAnchorGroupImpl}
  * so they follow the printed target directly. (No handoff to a world-tracked {@link CustomAnchor} — that would
  * replace image pose with SLAM and feel like drift relative to the marker.)
+ *
+ * For sequential hunts, mount a second instance with {@link Props.persistentCollected} on the previous step’s
+ * `.zpt` so the collected cube stays on that print until the next marker is collected.
  */
 export function MarkerImageContent({
   enabled,
   targetZptUrl,
+  persistentCollected = false,
+  reportTracking = true,
+  reportTargetLoad = true,
+  showPersistentCollectedMesh = true,
   showCollectedCube = false,
   onTrackedChange,
   onTargetLoadState,
@@ -57,18 +75,24 @@ export function MarkerImageContent({
       setTracker(null);
       setMarkerPlaneAspect(1);
       lastVisibleRef.current = false;
-      onTargetLoadState?.('idle');
-      onTrackedChange?.(false);
+      if (reportTargetLoad) {
+        onTargetLoadState?.('idle');
+      }
+      if (reportTracking) {
+        onTrackedChange?.(false);
+      }
       return;
     }
-  }, [enabled]);
+  }, [enabled, reportTargetLoad, reportTracking, onTargetLoadState, onTrackedChange]);
 
   useEffect(() => {
     if (!enabled) {
       return;
     }
 
-    onTargetLoadState?.('loading');
+    if (reportTargetLoad) {
+      onTargetLoadState?.('loading');
+    }
     const t = new ImageTracker();
     t.enabled = false;
 
@@ -83,7 +107,9 @@ export function MarkerImageContent({
         }
         t.enabled = true;
         setTracker(t);
-        onTargetLoadState?.('ready');
+        if (reportTargetLoad) {
+          onTargetLoadState?.('ready');
+        }
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'Failed to load image target';
         console.error('[MarkerImageContent]', msg, e);
@@ -93,7 +119,9 @@ export function MarkerImageContent({
           } catch {
             /* ignore */
           }
-          onTargetLoadState?.('error', msg);
+          if (reportTargetLoad) {
+            onTargetLoadState?.('error', msg);
+          }
         }
       }
     })();
@@ -107,12 +135,14 @@ export function MarkerImageContent({
       }
       setTracker(null);
     };
-  }, [enabled, targetZptUrl, onTargetLoadState]);
+  }, [enabled, targetZptUrl, onTargetLoadState, reportTargetLoad]);
 
   useEffect(() => {
     lastVisibleRef.current = false;
-    onTrackedChange?.(false);
-  }, [targetZptUrl, onTrackedChange]);
+    if (reportTracking) {
+      onTrackedChange?.(false);
+    }
+  }, [targetZptUrl, onTrackedChange, reportTracking]);
 
   useFrame(() => {
     const t = trackerRef.current;
@@ -124,7 +154,9 @@ export function MarkerImageContent({
       group.visible = false;
       if (lastVisibleRef.current) {
         lastVisibleRef.current = false;
-        onTrackedChange?.(false);
+        if (reportTracking) {
+          onTrackedChange?.(false);
+        }
       }
       return;
     }
@@ -132,7 +164,9 @@ export function MarkerImageContent({
     group.visible = vis;
     if (vis !== lastVisibleRef.current) {
       lastVisibleRef.current = vis;
-      onTrackedChange?.(vis);
+      if (reportTracking) {
+        onTrackedChange?.(vis);
+      }
     }
   }, AFTER_ZAPPAR_CAMERA_PRIORITY);
 
@@ -179,6 +213,10 @@ export function MarkerImageContent({
     return null;
   }
 
+  const persistCubeVisible = persistentCollected ? showPersistentCollectedMesh : true;
+  const showYellowCollectedCube = showCollectedCube || (persistentCollected && persistCubeVisible);
+  const showRockModel = !persistentCollected && !showCollectedCube;
+
   return (
     <>
       {tracker ? (
@@ -196,14 +234,14 @@ export function MarkerImageContent({
                 depthWrite={false}
               />
             </mesh>
-            {showCollectedCube ? (
+            {showYellowCollectedCube ? (
               <mesh position={[0, 0, MARKER_CUBE_SIZE_M * 0.5]}>
                 <boxGeometry args={[MARKER_CUBE_SIZE_M, MARKER_CUBE_SIZE_M, MARKER_CUBE_SIZE_M]} />
                 <meshBasicMaterial color="#ffcc33" />
               </mesh>
-            ) : (
+            ) : showRockModel ? (
               <MarkerRockStageModel />
-            )}
+            ) : null}
           </group>
         </imageAnchorGroupImpl>
       ) : null}

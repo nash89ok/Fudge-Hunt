@@ -24,7 +24,7 @@ const BRIGHTNESS_MULTIPLIER = 1;
 const EMISSIVE_LIFT = 0;
 
 /** Global ambient light intensity applied to the model scene. */
-const AMBIENT_LIGHT_INTENSITY = 0;
+const AMBIENT_LIGHT_INTENSITY = 2;
 
 /**
  * `SakuraStage.glb`: +90° about Y, scaled to {@link TARGET_MAX_EXTENT_M} on the longest axis (4× the prior base fit),
