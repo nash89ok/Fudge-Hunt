@@ -21,6 +21,31 @@ const MARKER_ZPT_URLS = [
 
 const MARKER_STEP_COUNT = MARKER_ZPT_URLS.length;
 
+/** Color UI icons for each slot after that marker is collected. */
+const FUDGE_MARKER_UI_URLS = [
+  `${import.meta.env.BASE_URL}hunt/FudgeMarker1.png`,
+  `${import.meta.env.BASE_URL}hunt/FudgeMarker2.png`,
+  `${import.meta.env.BASE_URL}hunt/FudgeMarker3.png`,
+] as const;
+
+/** Shared grayscale fudge for slots that are not collected yet. */
+const FUDGE_MARKER_DEFAULT_URL = `${import.meta.env.BASE_URL}hunt/FudgeMarkerDefault.png`;
+
+const TREASURE_MAP_URL = `${import.meta.env.BASE_URL}hunt/treasure-map.png`;
+
+/**
+ * Solid light-grey HUD surfaces + dark outline (collection strip + map chip).
+ * @see https://www.figma.com/design/NvCn1Y6oG9WEw6IwwznGi1/Untitled?node-id=33-6
+ */
+const HUNT_HUD_CHIP_BG = '#e4e4e6';
+const HUNT_HUD_CHIP_BORDER = '#6e6e73';
+
+/** Blue gradient primary action when the marker is tracked (“Collect it!”). */
+const COLLECT_CTA_TRACKED_GRADIENT =
+  'linear-gradient(180deg, #5aa6ff 0%, #2d87ff 45%, #1a6de8 100%)';
+const COLLECT_CTA_TRACKED_BORDER = 'rgba(255,255,255,0.82)';
+const COLLECT_CTA_TRACKED_SHADOW = '0 6px 20px rgba(26, 109, 232, 0.38)';
+
 /** Brief cube flash duration after tapping collect (ms). */
 const COLLECT_FEEDBACK_MS = 350;
 
@@ -36,6 +61,8 @@ const HUNT_INTRO_COPY =
 
 /**
  * ZapWorks WebAR: world-surface test mode, or sequential marker hunt (`fudge-marker1–3.zpt`).
+ * In-hunt HUD matches Figma frame 32:2 (camera + top fudge row + bottom bar + map).
+ * @see https://www.figma.com/design/NvCn1Y6oG9WEw6IwwznGi1/Untitled?node-id=32-2
  */
 export function ZapWorksCameraPreview() {
   const [sdkReady, setSdkReady] = useState(false);
@@ -49,6 +76,8 @@ export function ZapWorksCameraPreview() {
   const [targetLoadState, setTargetLoadState] = useState<TargetLoadState>('idle');
   const [targetLoadMessage, setTargetLoadMessage] = useState<string | undefined>(undefined);
   const [worldSurfacePlaced, setWorldSurfacePlaced] = useState(false);
+  /** Full-screen treasure map overlay from the bottom-right control. */
+  const [mapOpen, setMapOpen] = useState(false);
 
   useEffect(() => {
     if (!cameraOn) {
@@ -58,8 +87,22 @@ export function ZapWorksCameraPreview() {
       setTargetLoadState('idle');
       setTargetLoadMessage(undefined);
       setWorldSurfacePlaced(false);
+      setMapOpen(false);
     }
   }, [cameraOn]);
+
+  useEffect(() => {
+    if (!mapOpen) {
+      return;
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setMapOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mapOpen]);
 
   const onMarkerTrackedChange = useCallback((tracked: boolean) => {
     setMarkerTracked((prev) => (prev === tracked ? prev : tracked));
@@ -90,25 +133,22 @@ export function ZapWorksCameraPreview() {
   const huntActive = collectedCount < MARKER_STEP_COUNT;
 
   /**
-   * Image indices that need a secondary tracker: the last collected marker (yellow cube), and while the collect
-   * flash runs, the current marker’s .zpt is preloaded so the handoff does not blink when `collectedCount` increments.
+   * While hunting the next marker, turn off CV on the “collected” tracker so only the hunt
+   * {@link ImageTracker} runs — dual active trackers often prevent the next `.zpt` from ever locking.
+   */
+  const pausePersistImageCv = cameraOn && huntActive && !markerTracked && collectedCount > 0;
+
+  /**
+   * Secondary tracker only for the last collected marker (persistent yellow cube).
+   * Do not mount a second tracker for the same `.zpt` as the hunt layer during the collect flash — duplicate
+   * `ImageTracker` instances on one target can break recognition for the next step.
    */
   const persistLayerIndices = useMemo(() => {
-    if (!cameraOn || !huntActive) {
+    if (!cameraOn || !huntActive || collectedCount <= 0) {
       return [] as number[];
     }
-    const out: number[] = [];
-    if (collectedCount > 0) {
-      out.push(collectedCount - 1);
-    }
-    if (showCollectedCube && collectedCount < MARKER_STEP_COUNT) {
-      const preloadIdx = collectedCount;
-      if (!out.includes(preloadIdx)) {
-        out.push(preloadIdx);
-      }
-    }
-    return out;
-  }, [cameraOn, huntActive, collectedCount, showCollectedCube]);
+    return [collectedCount - 1];
+  }, [cameraOn, huntActive, collectedCount]);
 
   useEffect(() => {
     let cancelled = false;
@@ -186,7 +226,7 @@ export function ZapWorksCameraPreview() {
         : huntComplete
           ? 'All markers collected!'
           : markerTracked
-            ? `Marker ${collectedCount + 1} of ${MARKER_STEP_COUNT} — tap “collect it!” when ready.`
+            ? `Marker ${collectedCount + 1} of ${MARKER_STEP_COUNT} — tap “Collect it!” when ready.`
             : `Find marker ${collectedCount + 1} of ${MARKER_STEP_COUNT} — aim the camera at the print.`;
 
   return (
@@ -326,79 +366,260 @@ export function ZapWorksCameraPreview() {
           </button>
         </div>
       )}
-      {cameraOn && (
+      <ZapparCanvas
+        style={{
+          width: '100%',
+          height: '100dvh',
+          display: 'block',
+          position: 'relative',
+          zIndex: 0,
+        }}
+        gl={{ antialias: true }}
+      >
+        <ambientLight intensity={2} />
+        <directionalLight position={[2, 4, 3]} intensity={1.2} />
+        <ZapparCamera userFacing={false} start={cameraOn} permissionRequest={false} />
+        {!WORLD_SURFACE_TEST_MODE && cameraOn ? <MarkerWorldEnvironment enabled /> : null}
+        {WORLD_SURFACE_TEST_MODE ? (
+          <WorldSurfaceTestContent enabled={cameraOn} onSurfacePlaced={onWorldSurfacePlaced} />
+        ) : (
+          <>
+            {persistLayerIndices.map((persistZptIndex) => (
+              <MarkerImageContent
+                key={`persist-zpt-${persistZptIndex}`}
+                enabled
+                persistentCollected
+                pauseImageTrackerCv={pausePersistImageCv}
+                reportTracking={false}
+                reportTargetLoad={false}
+                targetZptUrl={MARKER_ZPT_URLS[persistZptIndex]}
+                showPersistentCollectedMesh={collectedCount > 0 && persistZptIndex === collectedCount - 1}
+              />
+            ))}
+            <MarkerImageContent
+              enabled={cameraOn && huntActive}
+              targetZptUrl={MARKER_ZPT_URLS[Math.min(collectedCount, MARKER_STEP_COUNT - 1)]}
+              showCollectedCube={showCollectedCube}
+              onTrackedChange={onMarkerTrackedChange}
+              onTargetLoadState={onTargetLoadState}
+            />
+          </>
+        )}
+      </ZapparCanvas>
+      {cameraOn ? (
         <p
           style={{
             position: 'absolute',
-            left: 0,
-            right: 0,
-            top: 12,
-            zIndex: 3,
+            left: 8,
+            right: 8,
+            top: 'max(104px, calc(env(safe-area-inset-top, 0px) + 92px))',
+            zIndex: 12,
             margin: 0,
-            padding: '10px 16px',
-            fontSize: 14,
+            padding: '8px 12px',
+            fontSize: 13,
+            lineHeight: 1.35,
             textAlign: 'center',
             color: !WORLD_SURFACE_TEST_MODE && targetLoadState === 'error' ? '#faa' : '#eee',
-            background: 'rgba(0,0,0,0.55)',
+            background: 'rgba(0,0,0,0.45)',
+            borderRadius: 10,
             pointerEvents: 'none',
           }}
         >
           {bannerText}
         </p>
-      )}
+      ) : null}
       {!WORLD_SURFACE_TEST_MODE && cameraOn ? (
         <div
           style={{
             position: 'absolute',
-            left: 12,
-            top: 52,
-            zIndex: 6,
-            padding: '8px 12px',
-            borderRadius: 8,
-            fontSize: 14,
-            fontWeight: 600,
-            color: '#eee',
-            background: 'rgba(0,0,0,0.65)',
-            border: '1px solid rgba(255,255,255,0.2)',
+            left: 'clamp(7px, 2.2vw, 12px)',
+            top: 'max(12px, env(safe-area-inset-top, 0px))',
+            zIndex: 14,
+            boxSizing: 'border-box',
+            width: 'min(287px, calc(100vw - 24px))',
+            height: 87,
+            padding: '0 10px',
+            display: 'flex',
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-around',
+            borderRadius: 20,
+            border: `1px solid ${HUNT_HUD_CHIP_BORDER}`,
+            background: HUNT_HUD_CHIP_BG,
+            isolation: 'isolate',
             pointerEvents: 'none',
           }}
+          aria-label="Collection progress"
         >
-          Collected: {collectedCount} / {MARKER_STEP_COUNT}
+          {FUDGE_MARKER_UI_URLS.map((coloredSrc, index) => {
+            const collected = collectedCount > index;
+            return (
+              <span
+                key={coloredSrc}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 'min(80px, 22vw)',
+                  height: 54,
+                  borderRadius: 8,
+                  backgroundColor: HUNT_HUD_CHIP_BG,
+                }}
+              >
+                <img
+                  src={collected ? coloredSrc : FUDGE_MARKER_DEFAULT_URL}
+                  alt=""
+                  width={80}
+                  height={54}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'contain',
+                    display: 'block',
+                  }}
+                />
+              </span>
+            );
+          })}
         </div>
       ) : null}
       {!WORLD_SURFACE_TEST_MODE && cameraOn && huntActive ? (
-        <button
-          type="button"
-          onClick={onCollect}
-          disabled={!markerTracked}
+        <div
           style={{
             position: 'absolute',
-            left: '50%',
-            bottom: 92,
-            transform: 'translateX(-50%)',
-            zIndex: 4,
-            minWidth: 168,
-            padding: '12px 22px',
-            borderRadius: 999,
-            border: 'none',
-            fontSize: 16,
-            fontWeight: 700,
-            letterSpacing: 0.2,
-            color: '#fff',
-            background: markerTracked ? '#2f7dff' : '#80858f',
-            cursor: markerTracked ? 'pointer' : 'not-allowed',
-            boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
+            left: 'clamp(7px, 2.2vw, 12px)',
+            right: 'clamp(7px, 2.2vw, 12px)',
+            bottom: 'max(44px, calc(env(safe-area-inset-bottom, 0px) + 36px))',
+            zIndex: 16,
+            display: 'flex',
+            flexDirection: 'row',
+            alignItems: 'stretch',
+            gap: 10,
+            pointerEvents: 'none',
           }}
         >
-          {markerTracked ? 'collect it!' : 'detecting'}
-        </button>
+          <button
+            type="button"
+            onClick={onCollect}
+            disabled={!markerTracked}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              minHeight: 87,
+              padding: '0 clamp(14px, 4vw, 22px)',
+              borderRadius: 18,
+              border: markerTracked
+                ? `1px solid ${COLLECT_CTA_TRACKED_BORDER}`
+                : `1px solid ${HUNT_HUD_CHIP_BORDER}`,
+              background: markerTracked ? COLLECT_CTA_TRACKED_GRADIENT : HUNT_HUD_CHIP_BG,
+              color: markerTracked ? '#ffffff' : '#2c2c2e',
+              fontFamily: BRAND_FONT,
+              fontSize: markerTracked ? 'clamp(20px, 5.2vw, 26px)' : 'clamp(17px, 4.4vw, 21px)',
+              fontWeight: 400,
+              letterSpacing: markerTracked ? '0.02em' : 'normal',
+              textShadow: markerTracked ? '0 1px 2px rgba(0,0,0,0.2)' : 'none',
+              cursor: markerTracked ? 'pointer' : 'not-allowed',
+              /** Let touches reach the canvas while detecting; disabled buttons can still steal hits on some engines. */
+              pointerEvents: markerTracked ? 'auto' : 'none',
+              WebkitTapHighlightColor: 'transparent',
+              boxShadow: markerTracked ? COLLECT_CTA_TRACKED_SHADOW : '0 3px 10px rgba(0,0,0,0.12)',
+              transition:
+                'background 0.22s ease, border-color 0.22s ease, color 0.22s ease, box-shadow 0.22s ease',
+            }}
+          >
+            {markerTracked ? 'Collect it!' : 'Detecting ……'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setMapOpen(true)}
+            style={{
+              width: 'min(88px, 20vw)',
+              flexShrink: 0,
+              minHeight: 87,
+              borderRadius: 18,
+              border: `1px solid ${HUNT_HUD_CHIP_BORDER}`,
+              background: HUNT_HUD_CHIP_BG,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 6,
+              cursor: 'pointer',
+              pointerEvents: 'auto',
+              boxShadow: '0 3px 10px rgba(0,0,0,0.12)',
+            }}
+            aria-label="Open treasure map"
+          >
+            <img
+              src={TREASURE_MAP_URL}
+              alt=""
+              width={72}
+              height={72}
+              style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+            />
+          </button>
+        </div>
+      ) : null}
+      {mapOpen ? (
+        <div
+          role="presentation"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 40,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+            paddingBottom: 'max(20px, env(safe-area-inset-bottom, 0px))',
+            background: 'rgba(0,0,0,0.72)',
+            pointerEvents: 'auto',
+          }}
+          onClick={() => setMapOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Treasure map"
+            style={{ position: 'relative', maxWidth: 'min(420px, 100%)', maxHeight: '85dvh' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={TREASURE_MAP_URL}
+              alt="Treasure map"
+              width={420}
+              height={604}
+              style={{ width: '100%', height: 'auto', maxHeight: '85dvh', display: 'block', borderRadius: 8 }}
+            />
+            <button
+              type="button"
+              onClick={() => setMapOpen(false)}
+              style={{
+                position: 'absolute',
+                top: 8,
+                right: 8,
+                width: 36,
+                height: 36,
+                borderRadius: 999,
+                border: 'none',
+                background: 'rgba(0,0,0,0.55)',
+                color: '#fff',
+                fontSize: 22,
+                lineHeight: 1,
+                cursor: 'pointer',
+              }}
+              aria-label="Close map"
+            >
+              ×
+            </button>
+          </div>
+        </div>
       ) : null}
       {!WORLD_SURFACE_TEST_MODE && cameraOn && huntComplete ? (
         <div
           style={{
             position: 'absolute',
             inset: 0,
-            zIndex: 8,
+            zIndex: 24,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -430,47 +651,17 @@ export function ZapWorksCameraPreview() {
           left: 0,
           right: 0,
           bottom: 0,
-          zIndex: 1,
+          zIndex: 10,
           margin: 0,
-          padding: 12,
-          fontSize: 13,
-          background: 'rgba(0,0,0,0.5)',
+          padding: '8px 12px',
+          fontSize: 11,
+          background: 'rgba(0,0,0,0.45)',
           pointerEvents: 'none',
+          opacity: cameraOn ? 0.72 : 1,
         }}
       >
         Fudge Hunt · ZapWorks WebAR · Register your domain with ZapWorks for production
       </p>
-      <ZapparCanvas style={{ width: '100%', height: '100dvh', display: 'block' }} gl={{ antialias: true }}>
-        <ambientLight intensity={2} />
-        <directionalLight position={[2, 4, 3]} intensity={1.2} />
-        <ZapparCamera userFacing={false} start={cameraOn} permissionRequest={false} />
-        {!WORLD_SURFACE_TEST_MODE && cameraOn ? <MarkerWorldEnvironment enabled /> : null}
-        {WORLD_SURFACE_TEST_MODE ? (
-          <WorldSurfaceTestContent enabled={cameraOn} onSurfacePlaced={onWorldSurfacePlaced} />
-        ) : (
-          <>
-            {persistLayerIndices.map((persistZptIndex) => (
-              <MarkerImageContent
-                key={`persist-zpt-${persistZptIndex}`}
-                enabled
-                persistentCollected
-                reportTracking={false}
-                reportTargetLoad={false}
-                targetZptUrl={MARKER_ZPT_URLS[persistZptIndex]}
-                showPersistentCollectedMesh={collectedCount > 0 && persistZptIndex === collectedCount - 1}
-              />
-            ))}
-            <MarkerImageContent
-              key={`hunt-${collectedCount}`}
-              enabled={cameraOn && huntActive}
-              targetZptUrl={MARKER_ZPT_URLS[Math.min(collectedCount, MARKER_STEP_COUNT - 1)]}
-              showCollectedCube={showCollectedCube}
-              onTrackedChange={onMarkerTrackedChange}
-              onTargetLoadState={onTargetLoadState}
-            />
-          </>
-        )}
-      </ZapparCanvas>
     </div>
   );
 }

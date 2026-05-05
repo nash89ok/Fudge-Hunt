@@ -31,6 +31,12 @@ type Props = {
    * (preload the next handoff while the hunt layer shows the collect flash on the same print).
    */
   showPersistentCollectedMesh?: boolean;
+  /**
+   * When true, the loaded {@link ImageTracker} stays in the scene but has `enabled = false` so it does not
+   * consume CV bandwidth. Use for a secondary “collected” tracker while the primary hunt tracker is still
+   * searching — some devices fail to lock the next marker if two image trackers run at once.
+   */
+  pauseImageTrackerCv?: boolean;
   showCollectedCube?: boolean;
   onTrackedChange?: (tracked: boolean) => void;
   onTargetLoadState?: (state: TargetLoadState, message?: string) => void;
@@ -51,12 +57,16 @@ export function MarkerImageContent({
   reportTracking = true,
   reportTargetLoad = true,
   showPersistentCollectedMesh = true,
+  pauseImageTrackerCv = false,
   showCollectedCube = false,
   onTrackedChange,
   onTargetLoadState,
 }: Props) {
   const { camera } = useThree();
   const zapparCamera = camera as unknown as ZapparCamera;
+
+  const pauseCvRef = useRef(pauseImageTrackerCv);
+  pauseCvRef.current = pauseImageTrackerCv;
 
   const [tracker, setTracker] = useState<ImageTracker | null>(null);
   /** Width/height of the printed target image for a full-bleed marker plane in anchor units. */
@@ -105,7 +115,7 @@ export function MarkerImageContent({
         if (cancelled) {
           return;
         }
-        t.enabled = true;
+        t.enabled = !pauseCvRef.current;
         setTracker(t);
         if (reportTargetLoad) {
           onTargetLoadState?.('ready');
@@ -136,6 +146,16 @@ export function MarkerImageContent({
       setTracker(null);
     };
   }, [enabled, targetZptUrl, onTargetLoadState, reportTargetLoad]);
+
+  /**
+   * Toggle CV without destroying the tracker (pairs with {@link pauseImageTrackerCv} after load).
+   */
+  useEffect(() => {
+    if (!tracker || !enabled) {
+      return;
+    }
+    tracker.enabled = !pauseImageTrackerCv;
+  }, [tracker, enabled, pauseImageTrackerCv]);
 
   useEffect(() => {
     lastVisibleRef.current = false;
